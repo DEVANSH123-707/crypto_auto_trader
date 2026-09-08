@@ -1,0 +1,40 @@
+[project]
+name = "crypto-auto-trader"
+version = "1.0.0"
+description = "FastAPI backend that turns TradingView alerts into Binance testnet orders"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra --strict-markers"
+# "auto" means a plain `async def test_...` is run as a coroutine without
+# needing a decorator on every test. One session-scoped event loop is shared by
+# the tests and the async fixtures, so the engine, the app and the assertions
+# all live on the same loop.
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+# Warnings are errors, so a deprecation in *our* code fails the build. The
+# exceptions below are all warnings raised inside third-party packages that we
+# cannot fix from here.
+filterwarnings = [
+    "error",
+    # SQLAlchemy warns that SQLite has no native DECIMAL type and converts via
+    # float. The test suite uses SQLite by default; PostgreSQL (what production
+    # uses) stores NUMERIC natively, so this is a test-environment artefact.
+    "ignore:Dialect sqlite\\+pysqlite.*does \\*not\\* support Decimal:UserWarning",
+    # Starlette 1.6 still imports a deprecated anyio alias.
+    "ignore:The anyio.abc.BlockingPortal alias is deprecated:DeprecationWarning",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "C4"]
+ignore = ["B008"]  # FastAPI's Depends() in defaults is idiomatic
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501"]

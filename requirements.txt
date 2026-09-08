@@ -1,0 +1,31 @@
+# Install with:  pip install -r requirements.txt
+# Versions are pinned so a fresh clone builds the environment that was tested.
+
+# --- Web framework ---------------------------------------------------------
+fastapi==0.141.1
+uvicorn[standard]==0.52.4      # ASGI server that actually runs the app
+
+# --- Database (async) ------------------------------------------------------
+SQLAlchemy==2.0.52             # used via create_async_engine / AsyncSession
+asyncpg==0.31.0                # async PostgreSQL driver
+alembic==1.19.2                # schema migrations (runs on the async engine)
+
+# --- Validation and configuration -----------------------------------------
+pydantic==2.13.5
+pydantic-settings==2.15.0      # reads and validates .env at startup
+email-validator==2.3.0         # backs pydantic's EmailStr type
+
+# --- Security --------------------------------------------------------------
+PyJWT==2.13.0                  # signs and verifies access tokens
+bcrypt==5.0.0                  # password hashing (run on a worker thread)
+
+# --- HTTP client -----------------------------------------------------------
+# httpx2 is the current release line of httpx (the distribution was renamed at
+# 2.0). Used for the async Binance testnet client, by Starlette's test client,
+# and by the benchmark/simulation scripts.
+httpx2==2.12.0
+
+# --- Testing ---------------------------------------------------------------
+pytest==9.1.1
+pytest-asyncio==1.3.0          # runs the async test suite
+aiosqlite==0.21.0              # async SQLite, so `pytest` needs no PostgreSQL

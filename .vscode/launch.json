@@ -1,0 +1,29 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "FastAPI: uvicorn --reload",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["app.main:app", "--reload", "--port", "8000"],
+      "jinja": true,
+      "justMyCode": false,
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Check setup",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "scripts.check_setup",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Reconcile stuck trades",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "scripts.reconcile",
+      "console": "integratedTerminal"
+    }
+  ]
+}

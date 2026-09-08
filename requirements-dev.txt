@@ -1,0 +1,5 @@
+# Development-only tools. Install with:
+#     pip install -r requirements.txt -r requirements-dev.txt
+-r requirements.txt
+
+ruff==0.16.6      # linter + formatter; configured in pyproject.toml
