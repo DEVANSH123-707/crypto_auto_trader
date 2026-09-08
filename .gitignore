@@ -45,3 +45,8 @@ desktop.ini
 # --- Logs ------------------------------------------------------------------
 *.log
 logs/
+
+# --- Local archives --------------------------------------------------------
+# `git bundle` output and similar local snapshots: useful on this machine,
+# noise in the repository.
+*.bundle

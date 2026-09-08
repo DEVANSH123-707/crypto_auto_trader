@@ -138,6 +138,56 @@ class TestConfigurationValidation:
         )
         assert settings.DATABASE_URL.startswith("postgresql+asyncpg://")
 
+    async def test_a_render_style_postgres_url_is_rewritten_for_asyncpg(self):
+        """Render (and Heroku) hand out ``postgres://``; asyncpg needs the
+        dialect spelled out."""
+        settings = Settings(
+            _env_file=None,
+            **valid_env(DATABASE_URL="postgres://u:p@dpg-abc-a.oregon-postgres/db"),
+        )
+        assert settings.DATABASE_URL == (
+            "postgresql+asyncpg://u:p@dpg-abc-a.oregon-postgres/db"
+        )
+
+    async def test_libpq_sslmode_is_translated_to_asyncpgs_spelling(self):
+        """SQLAlchemy forwards unknown query parameters to asyncpg.connect(),
+        which would raise TypeError on libpq's ``sslmode``."""
+        settings = Settings(
+            _env_file=None,
+            **valid_env(
+                DATABASE_URL="postgresql://u:p@host:5432/db?sslmode=require"
+            ),
+        )
+        assert settings.DATABASE_URL.endswith("?ssl=require")
+
+    async def test_libpq_only_parameters_are_dropped(self):
+        """``channel_binding`` has no asyncpg equivalent; the TLS requirement
+        still survives as ``ssl``."""
+        settings = Settings(
+            _env_file=None,
+            **valid_env(
+                DATABASE_URL=(
+                    "postgresql://u:p@host:5432/db"
+                    "?sslmode=verify-full&channel_binding=require"
+                )
+            ),
+        )
+        assert settings.DATABASE_URL.endswith("?ssl=verify-full")
+
+    async def test_a_url_without_query_parameters_is_untouched(self):
+        """The local Windows/PostgreSQL URL must survive normalisation."""
+        settings = Settings(
+            _env_file=None,
+            **valid_env(
+                DATABASE_URL=(
+                    "postgresql+asyncpg://crypto_user:pw@localhost:5432/crypto_trader"
+                )
+            ),
+        )
+        assert settings.DATABASE_URL == (
+            "postgresql+asyncpg://crypto_user:pw@localhost:5432/crypto_trader"
+        )
+
     async def test_allowed_symbols_are_parsed_into_a_set(self):
         settings = Settings(
             _env_file=None, **valid_env(ALLOWED_SYMBOLS="btcusdt, ETHUSDT ")

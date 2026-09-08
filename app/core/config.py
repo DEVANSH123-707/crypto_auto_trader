@@ -12,7 +12,7 @@ request.
 from __future__ import annotations
 
 from functools import lru_cache
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlsplit, urlunsplit
 
 from pydantic import Field, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -62,6 +62,43 @@ PLACEHOLDER_SECRETS: frozenset[str] = frozenset(
         "string",
     }
 )
+
+
+# ---------------------------------------------------------------------------
+# PostgreSQL URL normalisation
+# ---------------------------------------------------------------------------
+# Managed PostgreSQL providers hand out libpq-style URLs. SQLAlchemy passes any
+# query parameter it does not recognise straight through to ``asyncpg.connect``
+# as a keyword argument, and asyncpg does not speak libpq: a URL ending in
+# ``?sslmode=require`` fails with
+#
+#     TypeError: connect() got an unexpected keyword argument 'sslmode'
+#
+# asyncpg spells the same thing ``ssl`` and accepts the identical set of values
+# (disable / allow / prefer / require / verify-ca / verify-full), so the
+# parameter is renamed rather than dropped - dropping it would silently
+# downgrade a URL that explicitly asked for TLS.
+LIBPQ_SSL_PARAM_RENAMES: dict[str, str] = {"sslmode": "ssl"}
+
+#: libpq parameters asyncpg has no equivalent for. Kept, they would crash the
+#: connection the same way; the TLS requirement is still carried by ``ssl``.
+LIBPQ_PARAMS_ASYNCPG_IGNORES: frozenset[str] = frozenset({"channel_binding"})
+
+
+def normalise_postgres_query_params(url: str) -> str:
+    """Rewrite libpq-only query parameters into what asyncpg understands."""
+    if "?" not in url:
+        return url
+
+    scheme, netloc, path, query, fragment = urlsplit(url)
+    kept: list[tuple[str, str]] = []
+    for key, value in parse_qsl(query, keep_blank_values=True):
+        lowered = key.lower()
+        if lowered in LIBPQ_PARAMS_ASYNCPG_IGNORES:
+            continue
+        kept.append((LIBPQ_SSL_PARAM_RENAMES.get(lowered, key), value))
+
+    return urlunsplit((scheme, netloc, path, urlencode(kept), fragment))
 
 
 class Settings(BaseSettings):
@@ -147,6 +184,11 @@ class Settings(BaseSettings):
         (asyncpg rather than psycopg's async mode for one concrete reason:
         psycopg refuses to run on Windows' default ProactorEventLoop, which is
         the loop uvicorn gets. asyncpg works on it unchanged.)
+
+        Managed hosts (Render, Heroku, Neon) also hand out ``postgres://`` and
+        append libpq query parameters, so the URL's query string is translated
+        into asyncpg's spelling too - see
+        :func:`normalise_postgres_query_params`.
         """
         value = value.strip()
         if not value:
@@ -154,11 +196,16 @@ class Settings(BaseSettings):
 
         for prefix in ("postgresql+psycopg2://", "postgresql+psycopg://"):
             if value.startswith(prefix):
-                return "postgresql+asyncpg://" + value[len(prefix) :]
-        if value.startswith("postgresql://"):
-            return value.replace("postgresql://", "postgresql+asyncpg://", 1)
-        if value.startswith("postgres://"):
-            return value.replace("postgres://", "postgresql+asyncpg://", 1)
+                value = "postgresql+asyncpg://" + value[len(prefix) :]
+                break
+        else:
+            if value.startswith("postgresql://"):
+                value = value.replace("postgresql://", "postgresql+asyncpg://", 1)
+            elif value.startswith("postgres://"):
+                value = value.replace("postgres://", "postgresql+asyncpg://", 1)
+
+        if value.startswith("postgresql+asyncpg://"):
+            value = normalise_postgres_query_params(value)
         return value
 
     @field_validator("JWT_SECRET", "WEBHOOK_SECRET")

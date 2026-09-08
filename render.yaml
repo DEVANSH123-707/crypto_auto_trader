@@ -1,0 +1,133 @@
+# Render Blueprint: one FastAPI web service + one PostgreSQL database.
+#
+# Create it from the Render dashboard with New > Blueprint, pointed at this
+# repository. Render reads this file, provisions both resources, and prompts
+# for the values marked `sync: false`.
+#
+# Deliberately small: a single web service and a single database. No broker, no
+# worker service, no cache. The trade executor is an asyncio.Queue *inside* this
+# process (see app/services/execution_queue.py), which is why the service runs
+# as ONE instance with ONE uvicorn worker - see "Scaling" at the bottom.
+
+services:
+  - type: web
+    name: crypto-auto-trader
+    runtime: python
+    plan: free
+    # The web service and the database must share a region for DATABASE_URL
+    # below to resolve to the fast internal (private-network) URL.
+    region: oregon
+    autoDeployTrigger: commit
+
+    # Production dependencies only. requirements-dev.txt (ruff) is for local
+    # development and has no place in the deployed image.
+    buildCommand: pip install -r requirements.txt
+
+    # Migrations first, then the server: if `alembic upgrade head` fails the
+    # `&&` stops the chain, uvicorn never starts, and the deploy fails loudly
+    # instead of serving traffic against a schema that does not match the code.
+    #
+    # No --reload (that is a development-only file watcher) and no --workers:
+    # extra workers would be extra processes, each with its own private
+    # asyncio.Queue, which is exactly what this design must not have.
+    startCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+
+    # GET /health is dependency-free by design, so Render never recycles a
+    # healthy process just because PostgreSQL blinked. /health/ready is the
+    # endpoint that actually checks the database.
+    healthCheckPath: /health
+
+    envVars:
+      # ---- Database ----------------------------------------------------
+      # Injected by Render from the database defined below. Never hardcoded.
+      # Render emits a `postgresql://` URL; app/core/config.py rewrites it to
+      # `postgresql+asyncpg://` at startup.
+      - key: DATABASE_URL
+        fromDatabase:
+          name: crypto-auto-trader-db
+          property: connectionString
+
+      # ---- Secrets -----------------------------------------------------
+      # generateValue: a random base64-encoded 256-bit value (44 characters,
+      # comfortably over the 32-character minimum the config enforces).
+      # Nothing outside the process ever needs to read it.
+      - key: JWT_SECRET
+        generateValue: true
+
+      # sync: false -> Render prompts for this when the blueprint is created.
+      # Unlike JWT_SECRET you need to know this one: it is the secret the
+      # webhook caller presents. Generate it with:
+      #   python -c "import secrets; print(secrets.token_urlsafe(32))"
+      - key: WEBHOOK_SECRET
+        sync: false
+
+      # Binance SPOT TESTNET keys from https://testnet.binance.vision.
+      # Entered in the Render dashboard, never committed to this repository.
+      - key: BINANCE_API_KEY
+        sync: false
+      - key: BINANCE_SECRET_KEY
+        sync: false
+
+      # ---- Binance: TESTNET ONLY ---------------------------------------
+      # app/core/config.py refuses to start on any host outside its testnet
+      # allowlist, so a production URL here is a startup failure, not an
+      # accidental real-money order.
+      - key: BINANCE_BASE_URL
+        value: https://testnet.binance.vision
+
+      # true  -> POST /api/v3/order/test : Binance validates the order and
+      #          creates nothing. The trade is recorded FILLED with
+      #          binance_status=DRY_RUN_VALIDATED.
+      # false -> POST /api/v3/order      : a real order on the TESTNET.
+      # Starts safe; flip it in the dashboard when you want a live testnet fill.
+      - key: BINANCE_DRY_RUN
+        value: "true"
+
+      # ---- Application -------------------------------------------------
+      # The account webhook-created trades are attributed to. Register this
+      # exact address via POST /auth/register after the first deploy, or the
+      # webhook returns a configuration error.
+      - key: WEBHOOK_TRADE_OWNER_EMAIL
+        value: trader@example.com
+
+      - key: ENVIRONMENT
+        value: render
+      - key: LOG_LEVEL
+        value: INFO
+
+      # Queue the exchange call instead of making the webhook wait for it.
+      - key: WEBHOOK_ASYNC_EXECUTION
+        value: "true"
+      - key: EXECUTOR_WORKERS
+        value: "8"
+      - key: EXECUTOR_QUEUE_SIZE
+        value: "1000"
+
+databases:
+  - name: crypto-auto-trader-db
+    plan: free
+    region: oregon
+    databaseName: crypto_trader
+    user: crypto_user
+# postgresMajorVersion is deliberately unset: the schema uses nothing version
+# specific, so Render's current default is fine.
+#
+# ---------------------------------------------------------------------------
+# Scaling: what this configuration does NOT claim
+# ---------------------------------------------------------------------------
+# The execution queue is an in-process asyncio.Queue. It is not a distributed
+# queue and it is not durable on its own. Running two instances would give each
+# one a separate queue rather than one shared queue, so this service is
+# deliberately single-instance, single-worker.
+#
+# Correctness does not depend on the queue surviving. Every trade is committed
+# to PostgreSQL as PENDING *before* it is enqueued, and `submitted_at IS NULL`
+# distinguishes "never sent" from "sent, outcome unknown". A hard kill - which
+# on Render's free plan happens routinely, since the service spins down after
+# 15 minutes idle - loses queue contents but no trades: resume_pending() at the
+# next startup re-queues everything that was never sent, and reconciliation
+# handles anything that was. Losing the queue costs latency, not correctness.
+#
+# Going multi-instance would mean replacing asyncio.Queue with a shared durable
+# queue. That is a real change with real operational cost, and it is not what
+# this demo needs.
