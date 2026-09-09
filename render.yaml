@@ -88,7 +88,7 @@ services:
       # exact address via POST /auth/register after the first deploy, or the
       # webhook returns a configuration error.
       - key: WEBHOOK_TRADE_OWNER_EMAIL
-        value: trader@example.com
+        value: devanshj72@gmail.com
 
       - key: ENVIRONMENT
         value: render
